@@ -3,9 +3,13 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <ctime>
 #include <sstream>
 #include <iostream>
 #include <fstream>
+
+using std::vector;
+using std::string;
 
 using std::cout;
 using std::endl;
@@ -21,16 +25,22 @@ bool has_args(int num);
 void parse_args(
 	int num,
 	char* args[],
-	std::string& filename,
+	string& filename,
 	bool& isQuiet,
 	bool& isVerbose,
 	bool& isValid );
+
+// Convert an int to std::string and pad with leading zeroes.
+string pad_to_string(unsigned int x, unsigned int min_len);
+
+// Convert std::time_t to std::tm (temporarily disables C4996).
+std::tm time_t_to_tm(std::time_t input);
 
 
 
 int main(int argc, char* argv[])
 {
-	std::string filename;		// Includes /path/to/file or is relative.
+	string filename;		// Includes /path/to/file or is relative.
 	bool isQuiet = false;
 	bool isVerbose = false;
 	bool isInputValid = true;	// Check to end the progam after input validation.
@@ -39,8 +49,58 @@ int main(int argc, char* argv[])
 	parse_args(argc, argv, filename, isQuiet, isVerbose, isInputValid);
 	if (!isInputValid) { return 0; }
 
-	// Open file
-	std::vector<std::string> file_lines;
+	// Read file
+	vector<string> file_lines;
+	std::ifstream file_in(filename);
+	string buf;
+	if (file_in.is_open()) {
+		while (getline(file_in, buf)) {
+			file_lines.push_back(buf);
+		}
+	}
+	file_in.close();
+
+	// Write file
+	std::ofstream file_out(filename, std::ios::trunc);
+	int build_num = 0;
+	for (unsigned int i = 0; i < file_lines.size(); ++i) {
+		string key;
+		string val;
+		std::stringstream line(file_lines[i]);
+		getline(line, key, ':');
+		getline(line, val);
+		if (key == "build") {
+			build_num = std::stoi(val);
+			build_num++;
+			val = pad_to_string(build_num, 4); // MAGIC_NUM
+			file_lines[i] = key + ": " + val;
+		}
+		if (key == "build-date") {
+			using namespace std::chrono;
+			std::time_t build_time_t = system_clock::to_time_t(system_clock::now());
+			std::tm build_time = time_t_to_tm(build_time_t);
+			val = string(
+				std::to_string(1900 + build_time.tm_year) + "-" +
+				pad_to_string(build_time.tm_mon, 2) + "-" +
+				std::to_string(build_time.tm_mday) );
+			file_lines[i] = key + ": " + val;
+		}
+		if (key == "build-time") {
+			using namespace std::chrono;
+			std::time_t build_time_t = system_clock::to_time_t(system_clock::now());
+			std::tm build_time = time_t_to_tm(build_time_t);
+			val = string(
+				pad_to_string(build_time.tm_hour, 2) + ":" +
+				pad_to_string(build_time.tm_min, 2) + ":" +
+				pad_to_string(build_time.tm_sec, 2) );
+			file_lines[i] = key + ": " + val;
+		}
+
+		// write to file here
+		file_out << file_lines[i] << endl;
+		cout << file_lines[i] << endl;
+	}
+	file_out.close();
 
 	cout << endl;
     return 0;
@@ -115,4 +175,23 @@ void parse_args(
 			endl;
 		isValid = false;
 	}
+}
+
+string pad_to_string(unsigned int x, unsigned int min_len)
+{
+	string x_str = std::to_string(x);
+	int pad_len = 0;
+	if (x_str.size() < min_len) {
+		pad_len = min_len - x_str.size();
+	}
+	return string(pad_len, '0') + x_str;
+}
+
+std::tm time_t_to_tm(std::time_t input)
+{
+#pragma warning(push)
+#pragma warning(disable: 4996)
+	std::tm output = *(std::gmtime(&input));
+#pragma warning(pop)
+	return output;
 }
